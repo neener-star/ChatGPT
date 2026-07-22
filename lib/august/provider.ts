@@ -1,14 +1,14 @@
 import type { AugustResponse } from "./response-schema";
 
 export interface AugustModelProvider {
-  generate(input: {
-    prompt: string;
-    responseSchema: unknown;
-  }): Promise<AugustResponse>;
+  generate(input: { prompt: string; responseSchema: unknown }): Promise<AugustResponse>;
 }
 
+/**
+ * The provider is selected at runtime. This keeps AUGUST's cognitive architecture
+ * independent from a specific model vendor and makes local development possible
+ * without exposing API keys to the browser.
+ */
 export function getConfiguredProvider(): AugustModelProvider | null {
-  // Provider adapters will be plugged in here. Keeping this boundary means
-  // AUGUST's memory and personality architecture stays independent of the model vendor.
   return null;
 }
