@@ -4,6 +4,9 @@ import { rankMemories } from "@/lib/august/memory";
 import { buildAugustPrompt } from "@/lib/august/prompt";
 import { defaultPersonality } from "@/lib/august/personality";
 import { augustStore } from "@/lib/august/store";
+import { getConfiguredProvider } from "@/lib/august/provider";
+import { AUGUST_RESPONSE_SCHEMA } from "@/lib/august/response-schema";
+import { extractMemoryCandidates } from "@/lib/august/memory-write";
 
 export async function POST(request: Request) {
   try {
@@ -15,33 +18,48 @@ export async function POST(request: Request) {
     }
 
     const memories = rankMemories(message, augustStore.memories);
+    const personality = augustStore.personality.frequentWords.length
+      ? augustStore.personality
+      : defaultPersonality;
+
     const behavior = inferBehavior({
       userMessage: message,
       memories,
       beliefs: augustStore.beliefs,
-      personality: augustStore.personality.frequentWords.length ? augustStore.personality : defaultPersonality,
+      personality,
     });
 
-    const prompt = buildAugustPrompt(
-      message,
-      memories,
-      augustStore.beliefs,
-      augustStore.personality.frequentWords.length ? augustStore.personality : defaultPersonality
-    );
+    const prompt = buildAugustPrompt(message, memories, augustStore.beliefs, personality);
+    const provider = getConfiguredProvider();
 
-    // The model provider is intentionally not hard-coded yet.
-    // This endpoint currently exposes the assembled context so the UI can be wired
-    // before an API key is added. The production implementation will call the chosen
-    // provider here and validate its structured response against response-schema.ts.
+    if (!provider) {
+      return NextResponse.json({
+        ok: true,
+        status: "brain_ready",
+        behavior,
+        retrievedMemories: memories,
+        message: "AUGUST's cognitive pipeline is ready. Set AUGUST_PROVIDER=ollama to activate the local model.",
+      });
+    }
+
+    const result = await provider.generate({
+      prompt,
+      responseSchema: AUGUST_RESPONSE_SCHEMA,
+    });
+
+    const newMemories = extractMemoryCandidates(result, "conversation");
+    augustStore.memories.push(...newMemories);
+
     return NextResponse.json({
       ok: true,
-      status: "brain_ready",
-      behavior,
-      retrievedMemories: memories,
-      promptPreview: process.env.NODE_ENV === "development" ? prompt : undefined,
-      message: "AUGUST's cognitive pipeline is ready for a model provider.",
+      status: "responded",
+      response: result.response,
+      behavior: result.behavior,
+      memoryCandidates: newMemories,
+      beliefSignals: result.beliefSignals,
     });
-  } catch {
+  } catch (error) {
+    console.error("AUGUST API error", error);
     return NextResponse.json({ error: "AUGUST could not process the request." }, { status: 500 });
   }
 }
